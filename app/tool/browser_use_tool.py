@@ -1,7 +1,11 @@
 import asyncio
 import base64
 import json
-from typing import Generic, Optional, TypeVar
+import os
+import random
+import time
+from pathlib import Path
+from typing import Any, Generic, Optional, TypeVar
 
 from browser_use import Browser as BrowserUseBrowser
 from browser_use import BrowserConfig
@@ -131,6 +135,12 @@ class BrowserUseTool(BaseTool, Generic[Context]):
     tool_context: Optional[Context] = Field(default=None, exclude=True)
 
     llm: Optional[LLM] = Field(default_factory=LLM)
+    
+    # Persistent state settings
+    cache_dir: str = Field(default="./cache", exclude=True)
+    user_data_dir: Optional[str] = Field(default=None, exclude=True)
+    playwright: Optional[Any] = Field(default=None, exclude=True)
+    browser_type: Optional[Any] = Field(default=None, exclude=True)
 
     @field_validator("parameters", mode="before")
     def validate_parameters(cls, v: dict, info: ValidationInfo) -> dict:
@@ -138,42 +148,149 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             raise ValueError("Parameters cannot be empty")
         return v
 
+    async def _human_like_delay(self, min_delay=0.1, max_delay=0.5):
+        """Add a random human-like delay"""
+        delay = random.uniform(min_delay, max_delay)
+        await asyncio.sleep(delay)
+
+    async def _human_like_mouse_movement(self, page, target_element=None):
+        """Simulate human-like mouse movement"""
+        if target_element:
+            # Get element position
+            box = await target_element.bounding_box()
+            if box:
+                # Move mouse to element with some randomness
+                target_x = box['x'] + box['width'] / 2 + random.randint(-10, 10)
+                target_y = box['y'] + box['height'] / 2 + random.randint(-10, 10)
+                
+                # Move mouse with intermediate steps
+                current_x = random.randint(0, 1280)
+                current_y = random.randint(0, 720)
+                
+                steps = random.randint(3, 8)
+                for i in range(steps):
+                    intermediate_x = current_x + (target_x - current_x) * (i + 1) / steps
+                    intermediate_y = current_y + (target_y - current_y) * (i + 1) / steps
+                    await page.mouse.move(intermediate_x, intermediate_y)
+                    await self._human_like_delay(0.01, 0.05)
+        
+        # Random mouse movement to simulate human behavior
+        for _ in range(random.randint(1, 3)):
+            x = random.randint(0, 1280)
+            y = random.randint(0, 720)
+            await page.mouse.move(x, y)
+            await self._human_like_delay(0.01, 0.03)
+
+    async def _simulate_human_behavior(self, page):
+        """Simulate human-like behavior patterns"""
+        # Random viewport scrolling
+        if random.random() < 0.3:  # 30% chance
+            scroll_amount = random.randint(100, 500)
+            await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+            await self._human_like_delay(0.5, 1.5)
+        
+        # Random mouse movements
+        if random.random() < 0.4:  # 40% chance
+            await self._human_like_mouse_movement(page)
+        
+        # Random tab switching simulation
+        if random.random() < 0.1:  # 10% chance
+            await page.bring_to_front()
+            await self._human_like_delay(0.2, 0.8)
+        
+        # Random focus changes
+        if random.random() < 0.2:  # 20% chance
+            await page.evaluate("document.body.focus()")
+            await self._human_like_delay(0.1, 0.5)
+
     async def _ensure_browser_initialized(self) -> BrowserContext:
-        """Ensure browser and context are initialized."""
+        """Ensure browser and context are initialized with persistent state."""
         if self.browser is None:
-            browser_config_kwargs = {"headless": False, "disable_security": True}
+            # Create cache directory if it doesn't exist
+            cache_path = Path(self.cache_dir)
+            cache_path.mkdir(parents=True, exist_ok=True)
+            
+            # Set up persistent user data directory
+            self.user_data_dir = str(cache_path / "browser_profile")
+            user_data_path = Path(self.user_data_dir)
+            user_data_path.mkdir(parents=True, exist_ok=True)
 
-            if config.browser_config:
-                from browser_use.browser.browser import ProxySettings
-
-                # handle proxy settings.
-                if config.browser_config.proxy and config.browser_config.proxy.server:
-                    browser_config_kwargs["proxy"] = ProxySettings(
-                        server=config.browser_config.proxy.server,
-                        username=config.browser_config.proxy.username,
-                        password=config.browser_config.proxy.password,
-                    )
-
-                browser_attrs = [
-                    "headless",
-                    "disable_security",
-                    "extra_chromium_args",
-                    "chrome_instance_path",
-                    "wss_url",
-                    "cdp_url",
-                ]
-
-                for attr in browser_attrs:
-                    value = getattr(config.browser_config, attr, None)
-                    if value is not None:
-                        if not isinstance(value, list) or value:
-                            browser_config_kwargs[attr] = value
-
-            self.browser = BrowserUseBrowser(BrowserConfig(**browser_config_kwargs))
-
-        if self.context is None:
+            # Use Playwright's browser type directly to create persistent context
+            from playwright.async_api import async_playwright
+            
+            self.playwright = await async_playwright().start()
+            self.browser_type = self.playwright.chromium
+            
+            # Launch persistent context with simplified but effective settings
+            persistent_context = await self.browser_type.launch_persistent_context(
+                user_data_dir=self.user_data_dir,
+                headless=False,  # Ensure browser is visible
+                accept_downloads=True,
+                viewport={"width": 1280, "height": 720},
+                # Simplified but effective arguments
+                args=[
+                    # Core anti-detection
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    
+                    # Performance improvements
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage',
+                    '--disable-extensions',
+                    '--disable-software-rasterizer',
+                    '--disable-notifications',
+                    
+                    # Make it look more normal
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--disable-default-apps',
+                    
+                    # Remove automation indicators
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                ],
+                # Set a realistic user agent
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                # Set locale
+                locale='en-US',
+                # Set timezone
+                timezone_id='America/New_York',
+                # Enable JavaScript
+                java_script_enabled=True,
+                # Additional settings
+                bypass_csp=True,
+                ignore_https_errors=True,
+                # Don't ignore default args to avoid conflicts
+            )
+            
+            # Create a complete browser wrapper that implements all required methods
+            class PersistentBrowserWrapper:
+                def __init__(self, persistent_context, browser_type, playwright):
+                    self._persistent_context = persistent_context
+                    self.browser_type = browser_type
+                    self.playwright = playwright
+                    self.config = BrowserConfig()
+                    self.contexts = [persistent_context]
+                
+                async def get_playwright_browser(self):
+                    return self
+                
+                async def new_context(self, **kwargs):
+                    # Return the persistent context instead of creating a new one
+                    return self._persistent_context
+                
+                async def close(self):
+                    await self._persistent_context.close()
+                    await self.playwright.stop()
+            
+            # Create wrapper browser
+            self.browser = PersistentBrowserWrapper(persistent_context, self.browser_type, self.playwright)
+            
+            # Create a BrowserContext instance with the persistent context
             context_config = BrowserContextConfig()
-
+            
             # if there is context config in the config, use it.
             if (
                 config.browser_config
@@ -181,9 +298,232 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                 and config.browser_config.new_context_config
             ):
                 context_config = config.browser_config.new_context_config
-
-            self.context = await self.browser.new_context(context_config)
-            self.dom_service = DomService(await self.context.get_current_page())
+            
+            # Manually create the context with the persistent Playwright context
+            from browser_use.browser.context import BrowserContext
+            self.context = BrowserContext(self.browser, context_config)
+            
+            # Replace the internal context with the persistent one and set it as already created
+            self.context._context = persistent_context
+            self.context._is_initialized = True
+            
+            # Initialize DOM service with the existing page or create a new one
+            try:
+                # Try to get the first page if it exists
+                pages = persistent_context.pages
+                if pages:
+                    page = pages[0]
+                else:
+                    page = await persistent_context.new_page()
+            except:
+                page = await persistent_context.new_page()
+            
+            # Add comprehensive JavaScript to remove automation indicators
+            stealth_script = """
+                // Remove webdriver property
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+                
+                // Mock plugins properly
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [
+                        {
+                            0: {type: "application/x-google-chrome-pdf"},
+                            description: "Portable Document Format",
+                            filename: "internal-pdf-viewer",
+                            length: 1,
+                            name: "Chrome PDF Plugin"
+                        },
+                        {
+                            0: {type: "application/x-nacl"},
+                            description: "Native Client",
+                            filename: "internal-nacl-plugin",
+                            length: 1,
+                            name: "Native Client"
+                        },
+                        {
+                            0: {type: "application/pdf"},
+                            description: "Portable Document Format",
+                            filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+                            length: 1,
+                            name: "Chrome PDF Viewer"
+                        }
+                    ],
+                });
+                
+                // Mock languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en', 'en-GB'],
+                });
+                
+                // Mock platform
+                Object.defineProperty(navigator, 'platform', {
+                    get: () => 'Win32',
+                });
+                
+                // Mock hardware concurrency
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => 8,
+                });
+                
+                // Mock device memory
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => 8,
+                });
+                
+                // Mock connection
+                Object.defineProperty(navigator, 'connection', {
+                    get: () => ({
+                        effectiveType: '4g',
+                        rtt: 50,
+                        downlink: 10,
+                        saveData: false
+                    }),
+                });
+                
+                // Comprehensive chrome runtime mock
+                window.chrome = {
+                    app: {
+                        isInstalled: false,
+                        InstallState: {
+                            DISABLED: 'disabled',
+                            INSTALLED: 'installed',
+                            NOT_INSTALLED: 'not_installed'
+                        },
+                        RunningState: {
+                            CANNOT_RUN: 'cannot_run',
+                            READY_TO_RUN: 'ready_to_run',
+                            RUNNING: 'running'
+                        },
+                        getDetails: function() { return {}; },
+                        getIsInstalled: function() { return false; }
+                    },
+                    runtime: {
+                        PlatformOs: {
+                            ANDROID: 'android',
+                            CROS: 'cros',
+                            LINUX: 'linux',
+                            MAC: 'mac',
+                            OPENBSD: 'openbsd',
+                            WIN: 'win'
+                        },
+                        PlatformArch: {
+                            ARM: 'arm',
+                            X86_32: 'x86-32',
+                            X86_64: 'x86-64'
+                        },
+                        PlatformNaclArch: {
+                            ARM: 'arm',
+                            X86_32: 'x86-32',
+                            X86_64: 'x86-64'
+                        },
+                        RequestUpdateCheckStatus: {
+                            THROTTLED: 'throttled',
+                            NO_UPDATE: 'no_update',
+                            UPDATE_AVAILABLE: 'update_available'
+                        },
+                        id: 'abcdefghijklmnopqrst',
+                        getURL: function(path) { return 'chrome-extension://' + this.id + '/' + path; },
+                        getManifest: function() { return {}; },
+                        connect: function() { return {}; },
+                        sendMessage: function() {},
+                        openOptionsPage: function() {},
+                        reload: function() {}
+                    },
+                    csi: function() { return {}; },
+                    loadTimes: function() { return {}; },
+                    webstore: {
+                        onInstallStageChanged: {},
+                        onDownloadProgress: {}
+                    }
+                };
+                
+                // Mock permissions more comprehensively
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => {
+                    if (parameters.name === 'notifications') {
+                        return Promise.resolve({ state: Notification.permission });
+                    }
+                    if (parameters.name === 'geolocation') {
+                        return Promise.resolve({ state: 'granted' });
+                    }
+                    if (parameters.name === 'camera') {
+                        return Promise.resolve({ state: 'granted' });
+                    }
+                    if (parameters.name === 'microphone') {
+                        return Promise.resolve({ state: 'granted' });
+                    }
+                    return Promise.resolve({ state: 'granted' });
+                };
+                
+                // Remove automation indicators from permissions
+                Object.defineProperty(navigator, 'permissions', {
+                    get: () => ({
+                        query: (parameters) => Promise.resolve({ state: 'granted' })
+                    }),
+                });
+                
+                // Mock webgl vendor
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 0x1F00) { // UNMASKED_VENDOR_WEBGL
+                        return 'Intel Inc.';
+                    }
+                    if (parameter === 0x1F01) { // UNMASKED_RENDERER_WEBGL
+                        return 'Intel(R) Iris(TM) Graphics 6100';
+                    }
+                    return getParameter.call(this, parameter);
+                };
+                
+                // Mock screen properties
+                Object.defineProperty(screen, 'availHeight', {
+                    get: () => 1040,
+                });
+                Object.defineProperty(screen, 'availWidth', {
+                    get: () => 1920,
+                });
+                Object.defineProperty(screen, 'colorDepth', {
+                    get: () => 24,
+                });
+                Object.defineProperty(screen, 'pixelDepth', {
+                    get: () => 24,
+                });
+                
+                // Remove automation from console
+                console.clear = function() {};
+                console.log = function() {};
+                console.warn = function() {};
+                console.error = function() {};
+                console.info = function() {};
+                console.debug = function() {};
+                console.table = function() {};
+                console.trace = function() {};
+                console.dir = function() {};
+                console.dirxml = function() {};
+                console.group = function() {};
+                console.groupCollapsed = function() {};
+                console.groupEnd = function() {};
+                console.time = function() {};
+                console.timeEnd = function() {};
+                console.timeLog = function() {};
+                console.exception = function() {};
+                console.count = function() {};
+                console.countReset = function() {};
+                console.assert = function() {};
+                console.profile = function() {};
+                console.profileEnd = function() {};
+                console.timeStamp = function() {};
+                console.context = function() {};
+                console.createTask = function() {};
+            """
+            
+            await page.add_init_script(stealth_script)
+            
+            # Also add the script to the context so it applies to all new pages
+            await persistent_context.add_init_script(stealth_script)
+            
+            self.dom_service = DomService(page)
 
         return self.context
 
@@ -236,8 +576,20 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                             error="URL is required for 'go_to_url' action"
                         )
                     page = await context.get_current_page()
+                    
+                    # Add human-like behavior
+                    await self._human_like_delay(0.5, 1.5)
+                    await self._human_like_mouse_movement(page)
+                    
                     await page.goto(url)
                     await page.wait_for_load_state()
+                    
+                    # Add human behavior after navigation
+                    await self._simulate_human_behavior(page)
+                    
+                    # Add some random delay after navigation
+                    await self._human_like_delay(1.0, 2.0)
+                    
                     return ToolResult(output=f"Navigated to {url}")
 
                 elif action == "go_back":
@@ -276,7 +628,26 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     element = await context.get_dom_element_by_index(index)
                     if not element:
                         return ToolResult(error=f"Element with index {index} not found")
+                    
+                    page = await context.get_current_page()
+                    
+                    # Add human-like behavior before clicking
+                    await self._human_like_delay(0.3, 0.8)
+                    
+                    # Get the actual element from the page
+                    try:
+                        target_element = await page.query_selector(element.xpath)
+                        if target_element:
+                            await self._human_like_mouse_movement(page, target_element)
+                            await self._human_like_delay(0.1, 0.3)
+                    except:
+                        pass
+                    
                     download_path = await context._click_element_node(element)
+                    
+                    # Add delay after clicking
+                    await self._human_like_delay(0.5, 1.0)
+                    
                     output = f"Clicked element at index {index}"
                     if download_path:
                         output += f" - Downloaded file to {download_path}"
@@ -539,15 +910,18 @@ Page content:
             return ToolResult(error=f"Failed to get browser state: {str(e)}")
 
     async def cleanup(self):
-        """Clean up browser resources."""
+        """Clean up browser resources and save persistent state."""
         async with self.lock:
             if self.context is not None:
+                # Persistent context automatically saves state, no need to manually save
                 await self.context.close()
                 self.context = None
                 self.dom_service = None
             if self.browser is not None:
                 await self.browser.close()
                 self.browser = None
+                self.playwright = None
+                self.browser_type = None
 
     def __del__(self):
         """Ensure cleanup when object is destroyed."""
