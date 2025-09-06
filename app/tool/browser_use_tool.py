@@ -206,64 +206,84 @@ class BrowserUseTool(BaseTool, Generic[Context]):
     async def _ensure_browser_initialized(self) -> BrowserContext:
         """Ensure browser and context are initialized with persistent state."""
         if self.browser is None:
-            # Create cache directory if it doesn't exist
-            cache_path = Path(self.cache_dir)
-            cache_path.mkdir(parents=True, exist_ok=True)
-            
-            # Set up persistent user data directory
-            self.user_data_dir = str(cache_path / "browser_profile")
-            user_data_path = Path(self.user_data_dir)
-            user_data_path.mkdir(parents=True, exist_ok=True)
+            try:
+                print("Initializing browser...")
+                
+                # Create cache directory if it doesn't exist
+                cache_path = Path(self.cache_dir)
+                cache_path.mkdir(parents=True, exist_ok=True)
+                
+                # Set up persistent user data directory
+                self.user_data_dir = str(cache_path / "browser_profile")
+                user_data_path = Path(self.user_data_dir)
+                user_data_path.mkdir(parents=True, exist_ok=True)
 
-            # Use Playwright's browser type directly to create persistent context
-            from playwright.async_api import async_playwright
-            
-            self.playwright = await async_playwright().start()
-            self.browser_type = self.playwright.chromium
-            
-            # Launch persistent context with simplified but effective settings
-            persistent_context = await self.browser_type.launch_persistent_context(
-                user_data_dir=self.user_data_dir,
-                headless=False,  # Ensure browser is visible
-                accept_downloads=True,
-                viewport={"width": 1280, "height": 720},
-                # Simplified but effective arguments
-                args=[
-                    # Core anti-detection
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    
-                    # Performance improvements
-                    '--disable-gpu',
-                    '--disable-dev-shm-usage',
-                    '--disable-extensions',
-                    '--disable-software-rasterizer',
-                    '--disable-notifications',
-                    
-                    # Make it look more normal
-                    '--no-first-run',
-                    '--no-default-browser-check',
-                    '--disable-default-apps',
-                    
-                    # Remove automation indicators
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor',
-                ],
-                # Set a realistic user agent
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                # Set locale
-                locale='en-US',
-                # Set timezone
-                timezone_id='America/New_York',
-                # Enable JavaScript
-                java_script_enabled=True,
-                # Additional settings
-                bypass_csp=True,
-                ignore_https_errors=True,
-                # Don't ignore default args to avoid conflicts
-            )
+                # Use Playwright's browser type directly to create persistent context
+                from playwright.async_api import async_playwright
+                
+                print("Starting Playwright...")
+                self.playwright = await async_playwright().start()
+                self.browser_type = self.playwright.chromium
+                
+                # Simplified browser configuration for debugging
+                print("Launching browser context...")
+                persistent_context = await self.browser_type.launch_persistent_context(
+                    user_data_dir=self.user_data_dir,
+                    headless=False,  # Ensure browser is visible
+                    accept_downloads=True,
+                    viewport={"width": 1920, "height": 1080},
+                    # Basic anti-detection arguments
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-web-security',
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-extensions',
+                        '--disable-background-timer-throttling',
+                        '--disable-backgrounding-occluded-windows',
+                        '--disable-breakpad',
+                        '--disable-client-side-phishing-detection',
+                        '--disable-default-apps',
+                        '--disable-hang-monitor',
+                        '--disable-ipc-flooding-protection',
+                        '--disable-popup-blocking',
+                        '--disable-prompt-on-repost',
+                        '--disable-renderer-backgrounding',
+                        '--disable-sync',
+                        '--disable-translate',
+                        '--metrics-recording-only',
+                        '--no-first-run',
+                        '--no-default-browser-check',
+                        '--password-store=basic',
+                        '--use-mock-keychain',
+                        '--disable-gpu',
+                        '--disable-software-rasterizer',
+                        '--disable-notifications',
+                        '--window-position=0,0',
+                        '--window-size=1920,1080',
+                    ],
+                    # Set a realistic user agent
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    # Basic settings
+                    locale='en-US',
+                    timezone_id='America/New_York',
+                    java_script_enabled=True,
+                    bypass_csp=True,
+                    ignore_https_errors=False,
+                    color_scheme='light',
+                    geolocation={"latitude": 40.7128, "longitude": -74.0060},
+                    # Basic permissions
+                    permissions=["geolocation", "notifications", "camera", "microphone"],
+                )
+                
+                print("Browser context launched successfully!")
+                
+            except Exception as e:
+                print(f"Error launching browser: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
             
             # Create a complete browser wrapper that implements all required methods
             class PersistentBrowserWrapper:
@@ -285,9 +305,11 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     await self._persistent_context.close()
                     await self.playwright.stop()
             
+            print("Creating browser wrapper...")
             # Create wrapper browser
             self.browser = PersistentBrowserWrapper(persistent_context, self.browser_type, self.playwright)
             
+            print("Creating browser context...")
             # Create a BrowserContext instance with the persistent context
             context_config = BrowserContextConfig()
             
@@ -307,239 +329,55 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             self.context._context = persistent_context
             self.context._is_initialized = True
             
+            print("Getting browser page...")
             # Initialize DOM service with the existing page or create a new one
             try:
                 # Try to get the first page if it exists
                 pages = persistent_context.pages
                 if pages:
                     page = pages[0]
+                    print("Using existing page")
                 else:
                     page = await persistent_context.new_page()
-            except:
+                    print("Created new page")
+            except Exception as e:
+                print(f"Error getting page: {e}")
                 page = await persistent_context.new_page()
+                print("Created new page after error")
             
-            # Add comprehensive JavaScript to remove automation indicators
+            print("Adding stealth script...")
+            # Add basic stealth JavaScript
             stealth_script = """
-                // Remove webdriver property
-                if (Object.getOwnPropertyDescriptor(navigator, 'webdriver')?.configurable) {
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined,
-                    });
-                }
-                
-                // Mock plugins properly
-                if (Object.getOwnPropertyDescriptor(navigator, 'plugins')?.configurable) {
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [
-                        {
-                            0: {type: "application/x-google-chrome-pdf"},
-                            description: "Portable Document Format",
-                            filename: "internal-pdf-viewer",
-                            length: 1,
-                            name: "Chrome PDF Plugin"
-                        },
-                        {
-                            0: {type: "application/x-nacl"},
-                            description: "Native Client",
-                            filename: "internal-nacl-plugin",
-                            length: 1,
-                            name: "Native Client"
-                        },
-                        {
-                            0: {type: "application/pdf"},
-                            description: "Portable Document Format",
-                            filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
-                            length: 1,
-                            name: "Chrome PDF Viewer"
-                        }
-                    ],
-                    });
-                }
+                // Basic stealth script
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                    configurable: true
+                });
                 
                 // Mock languages
-                if (Object.getOwnPropertyDescriptor(navigator, 'languages')?.configurable) {
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['en-US', 'en', 'en-GB'],
-                    });
-                }
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                    configurable: true
+                });
                 
                 // Mock platform
-                if (Object.getOwnPropertyDescriptor(navigator, 'platform')?.configurable) {
-                    Object.defineProperty(navigator, 'platform', {
-                        get: () => 'Win32',
-                    });
-                }
+                Object.defineProperty(navigator, 'platform', {
+                    get: () => 'Win32',
+                    configurable: true
+                });
                 
-                // Mock hardware concurrency
-                if (Object.getOwnPropertyDescriptor(navigator, 'hardwareConcurrency')?.configurable) {
-                    Object.defineProperty(navigator, 'hardwareConcurrency', {
-                        get: () => 8,
-                    });
-                }
-                
-                // Mock device memory
-                if (Object.getOwnPropertyDescriptor(navigator, 'deviceMemory')?.configurable) {
-                    Object.defineProperty(navigator, 'deviceMemory', {
-                        get: () => 8,
-                    });
-                }
-                
-                // Mock connection
-                if (Object.getOwnPropertyDescriptor(navigator, 'connection')?.configurable) {
-                    Object.defineProperty(navigator, 'connection', {
-                        get: () => ({
-                            effectiveType: '4g',
-                            rtt: 50,
-                            downlink: 10,
-                            saveData: false
-                        }),
-                    });
-                }
-                
-                // Comprehensive chrome runtime mock
+                // Basic Chrome mock
                 window.chrome = {
-                    app: {
-                        isInstalled: false,
-                        InstallState: {
-                            DISABLED: 'disabled',
-                            INSTALLED: 'installed',
-                            NOT_INSTALLED: 'not_installed'
-                        },
-                        RunningState: {
-                            CANNOT_RUN: 'cannot_run',
-                            READY_TO_RUN: 'ready_to_run',
-                            RUNNING: 'running'
-                        },
-                        getDetails: function() { return {}; },
-                        getIsInstalled: function() { return false; }
-                    },
                     runtime: {
-                        PlatformOs: {
-                            ANDROID: 'android',
-                            CROS: 'cros',
-                            LINUX: 'linux',
-                            MAC: 'mac',
-                            OPENBSD: 'openbsd',
-                            WIN: 'win'
-                        },
-                        PlatformArch: {
-                            ARM: 'arm',
-                            X86_32: 'x86-32',
-                            X86_64: 'x86-64'
-                        },
-                        PlatformNaclArch: {
-                            ARM: 'arm',
-                            X86_32: 'x86-32',
-                            X86_64: 'x86-64'
-                        },
-                        RequestUpdateCheckStatus: {
-                            THROTTLED: 'throttled',
-                            NO_UPDATE: 'no_update',
-                            UPDATE_AVAILABLE: 'update_available'
-                        },
-                        id: 'abcdefghijklmnopqrst',
-                        getURL: function(path) { return 'chrome-extension://' + this.id + '/' + path; },
-                        getManifest: function() { return {}; },
-                        connect: function() { return {}; },
-                        sendMessage: function() {},
-                        openOptionsPage: function() {},
-                        reload: function() {}
-                    },
-                    csi: function() { return {}; },
-                    loadTimes: function() { return {}; },
-                    webstore: {
-                        onInstallStageChanged: {},
-                        onDownloadProgress: {}
+                        id: 'abcdefghijklmnopqrstuvwxyzabcdef',
+                        getURL: function(path) { return 'chrome-extension://' + this.id + '/' + path; }
                     }
                 };
                 
-                // Mock permissions more comprehensively
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => {
-                    if (parameters.name === 'notifications') {
-                        return Promise.resolve({ state: Notification.permission });
-                    }
-                    if (parameters.name === 'geolocation') {
-                        return Promise.resolve({ state: 'granted' });
-                    }
-                    if (parameters.name === 'camera') {
-                        return Promise.resolve({ state: 'granted' });
-                    }
-                    if (parameters.name === 'microphone') {
-                        return Promise.resolve({ state: 'granted' });
-                    }
-                    return Promise.resolve({ state: 'granted' });
-                };
-                
-                // Remove automation indicators from permissions
-                if (Object.getOwnPropertyDescriptor(navigator, 'permissions')?.configurable) {
-                    Object.defineProperty(navigator, 'permissions', {
-                        get: () => ({
-                            query: (parameters) => Promise.resolve({ state: 'granted' })
-                        }),
-                    });
-                }
-                
-                // Mock webgl vendor
-                const getParameter = WebGLRenderingContext.prototype.getParameter;
-                WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                    if (parameter === 0x1F00) { // UNMASKED_VENDOR_WEBGL
-                        return 'Intel Inc.';
-                    }
-                    if (parameter === 0x1F01) { // UNMASKED_RENDERER_WEBGL
-                        return 'Intel(R) Iris(TM) Graphics 6100';
-                    }
-                    return getParameter.call(this, parameter);
-                };
-                
-                // Mock screen properties
-                if (Object.getOwnPropertyDescriptor(screen, 'availHeight')?.configurable) {
-                    Object.defineProperty(screen, 'availHeight', {
-                        get: () => 1040,
-                    });
-                }
-                if (Object.getOwnPropertyDescriptor(screen, 'availWidth')?.configurable) {
-                    Object.defineProperty(screen, 'availWidth', {
-                        get: () => 1920,
-                    });
-                }
-                if (Object.getOwnPropertyDescriptor(screen, 'colorDepth')?.configurable) {
-                    Object.defineProperty(screen, 'colorDepth', {
-                        get: () => 24,
-                    });
-                }
-                if (Object.getOwnPropertyDescriptor(screen, 'pixelDepth')?.configurable) {
-                    Object.defineProperty(screen, 'pixelDepth', {
-                        get: () => 24,
-                    });
-                }
-                
-                // Remove automation from console
-                console.clear = function() {};
-                console.log = function() {};
-                console.warn = function() {};
-                console.error = function() {};
-                console.info = function() {};
-                console.debug = function() {};
-                console.table = function() {};
-                console.trace = function() {};
-                console.dir = function() {};
-                console.dirxml = function() {};
-                console.group = function() {};
-                console.groupCollapsed = function() {};
-                console.groupEnd = function() {};
-                console.time = function() {};
-                console.timeEnd = function() {};
-                console.timeLog = function() {};
-                console.exception = function() {};
-                console.count = function() {};
-                console.countReset = function() {};
-                console.assert = function() {};
-                console.profile = function() {};
-                console.profileEnd = function() {};
-                console.timeStamp = function() {};
-                console.context = function() {};
-                console.createTask = function() {};
+                // Remove automation flags
+                delete window._phantom;
+                delete window.callPhantom;
+                delete window.phantom;
             """
             
             await page.add_init_script(stealth_script)
@@ -547,7 +385,28 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             # Also add the script to the context so it applies to all new pages
             await persistent_context.add_init_script(stealth_script)
             
+            # Set basic headers
+            headers = {
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+            }
+            
+            await page.set_extra_http_headers(headers)
+            
+            # Add event listener to set headers on all new pages
+            async def set_headers_on_new_page(new_page):
+                await new_page.set_extra_http_headers(headers)
+            
+            persistent_context.on("page", lambda new_page: asyncio.create_task(set_headers_on_new_page(new_page)))
+            
+            print("Creating DOM service...")
             self.dom_service = DomService(page)
+            
+            print("Browser initialization completed successfully!")
 
         return self.context
 
@@ -604,6 +463,12 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     # Add human-like behavior
                     await self._human_like_delay(0.5, 1.5)
                     await self._human_like_mouse_movement(page)
+                    
+                    # Apply domain-specific bypass
+                    if 'google.com' in url or 'accounts.google.com' in url:
+                        await self.google_login_bypass(page)
+                    elif 'discord.com' in url:
+                        await self.discord_bypass(page)
                     
                     await page.goto(url)
                     await page.wait_for_load_state()
@@ -870,6 +735,264 @@ Page content:
 
             except Exception as e:
                 return ToolResult(error=f"Browser action '{action}' failed: {str(e)}")
+
+    async def google_login_bypass(self, page):
+        """
+        Additional measures specifically for Google login bypass.
+        This should be called before attempting Google login.
+        """
+        try:
+            # Additional JavaScript injection for Google-specific bypass
+            google_bypass_script = """
+                // Additional Google-specific stealth measures
+                
+                // Override navigator properties that Google specifically checks
+                Object.defineProperty(navigator, 'vendor', {
+                    get: () => 'Google Inc.',
+                    configurable: true
+                });
+                
+                Object.defineProperty(navigator, 'productSub', {
+                    get: () => '20030107',
+                    configurable: true
+                });
+                
+                // Mock specific Chrome properties that Google verifies
+                if (window.chrome) {
+                    window.chrome.app = {
+                        isInstalled: false,
+                        InstallState: 'disabled',
+                        RunningState: 'cannot_run'
+                    };
+                    
+                    window.chrome.csi = function() {
+                        return {
+                            onloadT: Date.now(),
+                            pageT: Date.now() - 1000,
+                            startE: Date.now() - 1500,
+                            tran: 15
+                        };
+                    };
+                }
+                
+                // Remove any automation痕迹 from localStorage
+                try {
+                    localStorage.removeItem('_puppeteer_');
+                    localStorage.removeItem('_selenium');
+                    localStorage.removeItem('_playwright');
+                } catch (e) {}
+                
+                // Add Google-specific user behavior simulation
+                let googleInteractionCount = 0;
+                document.addEventListener('click', () => {
+                    googleInteractionCount++;
+                });
+                
+                // Override performance.memory if available
+                if (performance.memory) {
+                    Object.defineProperty(performance, 'memory', {
+                        get: () => ({
+                            usedJSHeapSize: 10000000,
+                            totalJSHeapSize: 20000000,
+                            jsHeapSizeLimit: 4000000000
+                        }),
+                        configurable: true
+                    });
+                }
+            """
+            
+            await page.add_init_script(google_bypass_script)
+            
+            # Set referrer policy to look more natural
+            await page.evaluate("""
+                Object.defineProperty(document, 'referrer', {
+                    get: () => 'https://www.google.com/',
+                    configurable: true
+                });
+            """)
+            
+            return True
+        except Exception as e:
+            print(f"Google login bypass failed: {e}")
+            return False
+
+    async def discord_bypass(self, page):
+        """
+        Additional measures specifically for Discord to prevent BigInt errors.
+        This should be called before navigating to Discord.
+        """
+        try:
+            # Discord-specific JavaScript injection to prevent detection and errors
+            discord_bypass_script = """
+                // Discord-specific stealth and error fixes - COMPREHENSIVE VERSION
+                
+                // Comprehensive anti-detection for Discord
+                if (typeof navigator !== 'undefined') {
+                    // Hide webdriver flag
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined,
+                        configurable: true
+                    });
+                    
+                    // Hide automation flags
+                    Object.defineProperty(navigator, 'permissions', {
+                        get: () => ({
+                            query: () => Promise.resolve({ state: 'granted' })
+                        }),
+                        configurable: true
+                    });
+                    
+                    // Mock plugins
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [
+                            {
+                                0: {type: "application/x-google-chrome-pdf"},
+                                description: "Portable Document Format",
+                                filename: "internal-pdf-viewer",
+                                length: 1,
+                                name: "Chrome PDF Plugin"
+                            },
+                            {
+                                0: {type: "application/x-nacl"},
+                                description: "Native Client",
+                                filename: "internal-nacl-plugin",
+                                length: 1,
+                                name: "Native Client"
+                            }
+                        ],
+                        configurable: true
+                    });
+                    
+                    // Mock languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en', 'zh-CN', 'zh'],
+                        configurable: true
+                    });
+                    
+                    // Mock platform
+                    Object.defineProperty(navigator, 'platform', {
+                        get: () => 'Win32',
+                        configurable: true
+                    });
+                    
+                    // Mock hardware concurrency
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {
+                        get: () => 8,
+                        configurable: true
+                    });
+                }
+                
+                // Mock Chrome API for Discord
+                if (typeof window !== 'undefined') {
+                    window.chrome = {
+                        runtime: {
+                            id: 'abcdefghijklmnopqrstuvwxyzabcdef',
+                            getURL: function(path) { return 'chrome-extension://' + this.id + '/' + path; },
+                            getManifest: function() { return { version: '1.0.0' }; },
+                            connect: function() { return { postMessage: function() {}, onMessage: { addListener: function() {} } }; },
+                            sendMessage: function() { return Promise.resolve(); },
+                            onMessage: { addListener: function() {} },
+                            onConnect: { addListener: function() {} }
+                        },
+                        storage: {
+                            local: {
+                                get: function() { return Promise.resolve({}); },
+                                set: function() { return Promise.resolve(); }
+                            },
+                            sync: {
+                                get: function() { return Promise.resolve({}); },
+                                set: function() { return Promise.resolve(); }
+                            }
+                        },
+                        tabs: {
+                            query: function() { return Promise.resolve([]); },
+                            create: function() { return Promise.resolve({ id: 1 }); },
+                            update: function() { return Promise.resolve(); }
+                        }
+                    };
+                    
+                    // Mock Discord-specific APIs
+                    window.discord = window.discord || {};
+                    window.discord.experiments = window.discord.experiments || [];
+                    
+                    // Remove automation traces
+                    delete window._phantom;
+                    delete window.callPhantom;
+                    delete window.phantom;
+                    delete window.__nightmare;
+                    delete window._Selenium_IDE_Recorder;
+                }
+                
+                // Comprehensive error handling for Discord
+                if (typeof window !== 'undefined') {
+                    window.addEventListener('error', function(e) {
+                        if (e.message && (
+                            e.message.includes('cannot be converted to a BigInt') ||
+                            e.message.includes('addEventListener is not a function') ||
+                            e.message.includes('Maximum call stack size exceeded') ||
+                            e.message.includes('JavaScript is disabled') ||
+                            e.message.includes('enable JavaScript')
+                        )) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return false;
+                        }
+                    }, true);
+                    
+                    // Handle unhandled promise rejections
+                    window.addEventListener('unhandledrejection', function(e) {
+                        if (e.reason && (
+                            (e.reason.message && (
+                                e.reason.message.includes('BigInt') ||
+                                e.reason.message.includes('addEventListener') ||
+                                e.reason.message.includes('Maximum call stack size exceeded') ||
+                                e.reason.message.includes('JavaScript') ||
+                                e.reason.message.includes('enable')
+                            )) ||
+                            (typeof e.reason === 'string' && (
+                                e.reason.includes('BigInt') ||
+                                e.reason.includes('addEventListener') ||
+                                e.reason.includes('JavaScript')
+                            ))
+                        )) {
+                            e.preventDefault();
+                            return false;
+                        }
+                    }, true);
+                }
+                
+                // Ensure JavaScript is enabled for Discord
+                if (typeof document !== 'undefined') {
+                    // Remove any noscript elements that might be showing the JavaScript disabled message
+                    const noscripts = document.getElementsByTagName('noscript');
+                    for (let i = noscripts.length - 1; i >= 0; i--) {
+                        noscripts[i].parentNode.removeChild(noscripts[i]);
+                    }
+                }
+            """
+            
+            await page.add_init_script(discord_bypass_script)
+            
+            # Set viewport to Discord's preferred dimensions
+            await page.set_viewport_size({"width": 1280, "height": 720})
+            
+            # Wait a bit before navigation
+            await page.wait_for_timeout(1000)
+            
+            # Set extra headers specifically for Discord
+            await page.set_extra_http_headers({
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+            })
+            
+            return True
+        except Exception as e:
+            print(f"Discord bypass failed: {e}")
+            return False
 
     async def get_current_state(
         self, context: Optional[BrowserContext] = None
