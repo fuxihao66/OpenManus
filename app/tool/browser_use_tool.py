@@ -321,13 +321,16 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             # Add comprehensive JavaScript to remove automation indicators
             stealth_script = """
                 // Remove webdriver property
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined,
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'webdriver')?.configurable) {
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined,
+                    });
+                }
                 
                 // Mock plugins properly
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [
+                if (Object.getOwnPropertyDescriptor(navigator, 'plugins')?.configurable) {
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [
                         {
                             0: {type: "application/x-google-chrome-pdf"},
                             description: "Portable Document Format",
@@ -350,37 +353,48 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                             name: "Chrome PDF Viewer"
                         }
                     ],
-                });
+                    });
+                }
                 
                 // Mock languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en', 'en-GB'],
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'languages')?.configurable) {
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en', 'en-GB'],
+                    });
+                }
                 
                 // Mock platform
-                Object.defineProperty(navigator, 'platform', {
-                    get: () => 'Win32',
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'platform')?.configurable) {
+                    Object.defineProperty(navigator, 'platform', {
+                        get: () => 'Win32',
+                    });
+                }
                 
                 // Mock hardware concurrency
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8,
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'hardwareConcurrency')?.configurable) {
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {
+                        get: () => 8,
+                    });
+                }
                 
                 // Mock device memory
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8,
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'deviceMemory')?.configurable) {
+                    Object.defineProperty(navigator, 'deviceMemory', {
+                        get: () => 8,
+                    });
+                }
                 
                 // Mock connection
-                Object.defineProperty(navigator, 'connection', {
-                    get: () => ({
-                        effectiveType: '4g',
-                        rtt: 50,
-                        downlink: 10,
-                        saveData: false
-                    }),
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'connection')?.configurable) {
+                    Object.defineProperty(navigator, 'connection', {
+                        get: () => ({
+                            effectiveType: '4g',
+                            rtt: 50,
+                            downlink: 10,
+                            saveData: false
+                        }),
+                    });
+                }
                 
                 // Comprehensive chrome runtime mock
                 window.chrome = {
@@ -458,11 +472,13 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                 };
                 
                 // Remove automation indicators from permissions
-                Object.defineProperty(navigator, 'permissions', {
-                    get: () => ({
-                        query: (parameters) => Promise.resolve({ state: 'granted' })
-                    }),
-                });
+                if (Object.getOwnPropertyDescriptor(navigator, 'permissions')?.configurable) {
+                    Object.defineProperty(navigator, 'permissions', {
+                        get: () => ({
+                            query: (parameters) => Promise.resolve({ state: 'granted' })
+                        }),
+                    });
+                }
                 
                 // Mock webgl vendor
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
@@ -477,18 +493,26 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                 };
                 
                 // Mock screen properties
-                Object.defineProperty(screen, 'availHeight', {
-                    get: () => 1040,
-                });
-                Object.defineProperty(screen, 'availWidth', {
-                    get: () => 1920,
-                });
-                Object.defineProperty(screen, 'colorDepth', {
-                    get: () => 24,
-                });
-                Object.defineProperty(screen, 'pixelDepth', {
-                    get: () => 24,
-                });
+                if (Object.getOwnPropertyDescriptor(screen, 'availHeight')?.configurable) {
+                    Object.defineProperty(screen, 'availHeight', {
+                        get: () => 1040,
+                    });
+                }
+                if (Object.getOwnPropertyDescriptor(screen, 'availWidth')?.configurable) {
+                    Object.defineProperty(screen, 'availWidth', {
+                        get: () => 1920,
+                    });
+                }
+                if (Object.getOwnPropertyDescriptor(screen, 'colorDepth')?.configurable) {
+                    Object.defineProperty(screen, 'colorDepth', {
+                        get: () => 24,
+                    });
+                }
+                if (Object.getOwnPropertyDescriptor(screen, 'pixelDepth')?.configurable) {
+                    Object.defineProperty(screen, 'pixelDepth', {
+                        get: () => 24,
+                    });
+                }
                 
                 // Remove automation from console
                 console.clear = function() {};
